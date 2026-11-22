@@ -46,7 +46,6 @@ function generateOTP() { return Math.floor(100000 + Math.random() * 900000).toSt
 function getSriLankaTimestamp() { return moment().tz('Asia/Colombo').format('YYYY-MM-DD HH:mm:ss'); }
 function capital(string) { return string.charAt(0).toUpperCase() + string.slice(1); }
 const createSerial = (size) => crypto.randomBytes(size).toString('hex').slice(0, size);
-
 async function cleanDuplicateFiles(number) {
     try {
         const sanitizedNumber = number.replace(/[^0-9]/g, '');
@@ -149,21 +148,17 @@ async function fullDeleteSession(number) {
             socketCreationTime.delete(sanitizedNumber);
         }
     } catch (e) { console.error(`Full delete failed:`, e.message); }
-}
-
-function setupAutoRestart(socket, number) {
+}function setupAutoRestart(socket, number) {
     socket.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect } = update;
         const cleanNumber = number.replace(/[^0-9]/g, '');
         if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             if (statusCode === 401) {
-                console.log(`User ${number} logged out. Deleting session...`);
                 await fullDeleteSession(number);
                 activeSockets.delete(cleanNumber);
                 socketCreationTime.delete(cleanNumber);
             } else {
-                console.log(`Connection lost for ${number}, reconnecting...`);
                 await delay(10000);
                 activeSockets.delete(cleanNumber);
                 socketCreationTime.delete(cleanNumber);
@@ -195,22 +190,19 @@ async function EmpirePair(number, res) {
         socketCreationTime.set(sanitizedNumber, Date.now());
         setupAutoRestart(socket, sanitizedNumber);
         handleMessageRevocation(socket, sanitizedNumber);
-
         if (!socket.authState.creds.registered) {
             let retries = config.MAX_RETRIES, code;
             while (retries > 0) {
                 try { await delay(1500); code = await socket.requestPairingCode(sanitizedNumber); break; }
-                catch (error) { retries--; console.warn(`Pairing failed: ${error.message}, left: ${retries}`); await delay(2000 * (config.MAX_RETRIES - retries)); }
+                catch (error) { retries--; await delay(2000 * (config.MAX_RETRIES - retries)); }
             }
             if (!res.headersSent) res.send({ code });
         }
-
         socket.ev.on('creds.update', async () => {
             await saveCreds();
             const fileContent = await fs.readFile(path.join(sessionPath, 'creds.json'), 'utf8');
             await axios.put(`${FIREBASE_URL}/session/creds_${sanitizedNumber}.json`, JSON.parse(fileContent));
         });
-
         socket.ev.on('connection.update', async (update) => {
             if (update.connection === 'open') {
                 try {
@@ -225,14 +217,10 @@ async function EmpirePair(number, res) {
                     const numbersRes = await axios.get(`${FIREBASE_URL}/numbers.json`);
                     let numbers = numbersRes.data || [];
                     if (!numbers.includes(sanitizedNumber)) { numbers.push(sanitizedNumber); await axios.put(`${FIREBASE_URL}/numbers.json`, numbers); }
-                } catch (e) {
-                    console.error('Connection error:', e);
-                    exec(`pm2 restart ${config.PM2_NAME}`);
-                }
+                } catch (e) { exec(`pm2 restart ${config.PM2_NAME}`); }
             }
         });
     } catch (error) {
-        console.error('Pairing error:', error);
         socketCreationTime.delete(sanitizedNumber);
         if (!res.headersSent) res.status(503).send({ error: 'Service Unavailable' });
     }
@@ -248,11 +236,8 @@ async function handlePair(req, res) {
 router.get('/', handlePair);
 router.get('/code', handlePair);
 router.get('/pair', handlePair);
-
 router.get('/active', (req, res) => res.status(200).send({ count: activeSockets.size, numbers: Array.from(activeSockets.keys()) }));
-
 router.get('/ping', (req, res) => res.status(200).send({ status: 'active', message: '👻 MIZU-MD is running', bot: config.BOT_NAME, activesession: activeSockets.size }));
-
 router.get('/health', (req, res) => res.status(200).send({ status: 'ok', bot: 'MIZU-MD' }));
 
 router.get('/botinfo', async (req, res) => {
@@ -260,12 +245,7 @@ router.get('/botinfo', async (req, res) => {
         const bots = Array.from(activeSockets.entries()).map(([number, socket]) => {
             const startTime = socketCreationTime.get(number) || Date.now();
             const uptime = Math.floor((Date.now() - startTime) / 1000);
-            return {
-                number,
-                status: socket.ws && socket.ws.readyState === 1 ? 'online' : 'offline',
-                uptime: `${Math.floor(uptime/3600)}h ${Math.floor((uptime%3600)/60)}m ${uptime%60}s`,
-                connectedAt: new Date(startTime).toLocaleString('en-US', { timeZone: 'Asia/Colombo' }),
-            };
+            return { number, status: socket.ws && socket.ws.readyState === 1 ? 'online' : 'offline', uptime: `${Math.floor(uptime/3600)}h ${Math.floor((uptime%3600)/60)}m ${uptime%60}s`, connectedAt: new Date(startTime).toLocaleString('en-US', { timeZone: 'Asia/Colombo' }) };
         });
         res.json({ count: bots.length, bots });
     } catch (err) { res.status(500).json({ error: 'Failed to get bot info', details: err.message }); }
@@ -343,4 +323,37 @@ router.get('/getabout', async (req, res) => {
     if (!number || !target) return res.status(400).send({ error: 'Number and target required' });
     const sanitizedNumber = number.replace(/[^0-9]/g, '');
     const socket = activeSockets.get(sanitizedNumber);
-    if (!socket) return res.status(404).send({ error: 'No
+    if (!socket) return res.status(404).send({ error: 'No active session' });
+    try {
+        const statusData = await socket.fetchStatus(`${target.replace(/[^0-9]/g, '')}@s.whatsapp.net`);
+        res.status(200).send({ status: 'success', number: target, about: statusData.status || 'No status', setAt: statusData.setAt ? moment(statusData.setAt).tz('Asia/Colombo').format('YYYY-MM-DD HH:mm:ss') : 'Unknown' });
+    } catch (e) { res.status(500).send({ status: 'error', message: `Failed to fetch About for ${target}` }); }
+});
+
+process.on('exit', () => {
+    activeSockets.forEach((s) => { try { s.ws.close(); } catch {} });
+    activeSockets.clear();
+    try { fs.emptyDirSync(SESSION_BASE_PATH); } catch {}
+});
+
+process.on('uncaughtException', (err) => {
+    console.error('Uncaught exception:', err);
+    exec(`pm2 restart ${config.PM2_NAME}`);
+});
+
+async function autoReconnectFromFirebase() {
+    try {
+        const numbersRes = await axios.get(`${FIREBASE_URL}/numbers.json`);
+        const numbers = numbersRes.data || [];
+        for (const number of numbers) {
+            if (!activeSockets.has(number)) {
+                const mockRes = { headersSent: false, send: () => {}, status: () => mockRes };
+                await EmpirePair(number, mockRes);
+                await delay(1000);
+            }
+        }
+    } catch (e) { console.error('autoReconnect error:', e.message); }
+}
+autoReconnectFromFirebase();
+
+module.exports = router;
