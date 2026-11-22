@@ -28,7 +28,7 @@ const {
 const FIREBASE_URL = 'https://sakura-xd-default-rtdb.asia-southeast1.firebasedatabase.app/';
 
 const config = {
-    BOT_NAME: 'SAKURA-Xd',
+    BOT_NAME: 'MIZU-MD',
     BOT_FOOTER: 'ᴩᴏᴡᴇʀᴇᴅ ʙy ꜱᴀᴋᴜʀᴀ xᴅ </>',
     PREFIX: '.',
     MAX_RETRIES: 3,
