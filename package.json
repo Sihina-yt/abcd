@@ -1,7 +1,7 @@
 {
-  "name": "sakura-xd",
+  "name": "mizu md",
   "version": "1.0.0",
-  "description": "SAKURA-XD WhatsApp Bot with Multi-Number Support",
+  "description": "MIZU-MD WhatsApp Bot with Multi-Number Support",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
